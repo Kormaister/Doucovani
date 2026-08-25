@@ -980,10 +980,29 @@
       position: relative;
     }
 
+    .chart-detail {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      max-width: calc(100% - 24px);
+      border: 1px solid rgba(15, 118, 110, .2);
+      border-radius: 999px;
+      padding: 7px 11px;
+      color: var(--accent);
+      background: rgba(255, 255, 255, .94);
+      box-shadow: 0 8px 18px rgba(28, 42, 36, .1);
+      font-size: 12px;
+      font-weight: 900;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
     canvas {
       display: block;
       width: 100%;
       height: 100%;
+      cursor: pointer;
+      touch-action: manipulation;
     }
 
     .month-ranking {
@@ -1363,7 +1382,7 @@
                 <div class="color-options" aria-label="Barva klienta">
                   <label class="color-choice" title="Červená">
                     <input type="radio" name="color" value="#d85f3f">
-                    <span style="background: #d85f3f;">M</span>
+                    <span style="background: #d85f3f;">C</span>
                   </label>
                   <label class="color-choice" title="Zelená">
                     <input type="radio" name="color" value="#16746b" checked>
@@ -1533,7 +1552,8 @@
           </div>
           <div class="panel-body">
             <div class="chart-wrap">
-              <canvas id="yearChart" width="700" height="420" aria-label="Graf výdělku za rok"></canvas>
+              <canvas id="yearChart" width="700" height="420" tabindex="0" aria-label="Graf výdělku za rok"></canvas>
+              <div class="chart-detail" id="chartDetail" aria-live="polite" hidden></div>
             </div>
           </div>
         </section>
@@ -1592,6 +1612,8 @@
       search: "",
       activeView: "ledger",
       pendingAssignments: [],
+      chartSelection: null,
+      chartBars: [],
     };
 
     const els = {
@@ -1628,6 +1650,7 @@
       paidHoursRatio: document.querySelector("#paidHoursRatio"),
       yearTotal: document.querySelector("#yearTotal"),
       yearChart: document.querySelector("#yearChart"),
+      chartDetail: document.querySelector("#chartDetail"),
       monthRanking: document.querySelector("#monthRanking"),
       selectedMonthLabel: document.querySelector("#selectedMonthLabel"),
       bestMonth: document.querySelector("#bestMonth"),
@@ -1649,6 +1672,10 @@
 
     function normalizeColor(color) {
       return COLOR_OPTIONS.includes(String(color).toLowerCase()) ? String(color).toLowerCase() : COLOR_OPTIONS[0];
+    }
+
+    function isAutoPaidClient(client) {
+      return normalizeColor(client.color) === RED_COLOR;
     }
 
     function usesPaidHoursCounter(client) {
@@ -1963,6 +1990,9 @@
       if (isPrepaidClient(client)) {
         return prepaidHoursCoveredThisMonth(client, record, year, month) * wholeNumber(record.rate);
       }
+      if (isAutoPaidClient(client)) {
+        return totalForRecord(record);
+      }
       if (!usesPaidHoursCounter(client)) {
         return record.paid ? totalForRecord(record) : 0;
       }
@@ -1972,6 +2002,9 @@
     function paidHoursForClient(client, record, year = state.selectedYear, month = state.selectedMonth) {
       if (isPrepaidClient(client)) {
         return prepaidHoursCoveredThisMonth(client, record, year, month);
+      }
+      if (isAutoPaidClient(client)) {
+        return wholeNumber(record.hours);
       }
       if (!usesPaidHoursCounter(client)) {
         return record.paid ? wholeNumber(record.hours) : 0;
@@ -2005,6 +2038,15 @@
             <span class="prepaid-label">Předplaceno</span>
             ${renderPaymentStatus(client, record)}
             <small class="metric-note">${note}</small>
+          </div>
+        `;
+      }
+
+      if (isAutoPaidClient(client)) {
+        return `
+          <div class="payment-cell">
+            <span class="prepaid-label">Automaticky</span>
+            ${renderPaymentStatus(client, record)}
           </div>
         `;
       }
@@ -2286,6 +2328,17 @@
       return MONTHS.map((_, index) => monthTotals(year, index).total);
     }
 
+    function renderChartDetail(data = yearlyTotals(state.selectedYear)) {
+      if (!Number.isInteger(state.chartSelection)) {
+        els.chartDetail.hidden = true;
+        els.chartDetail.textContent = "";
+        return;
+      }
+      const month = normalizeMonth(state.chartSelection);
+      els.chartDetail.hidden = false;
+      els.chartDetail.textContent = `${MONTHS[month]} ${state.selectedYear}: ${money(data[month])}`;
+    }
+
     function renderChart() {
       const canvas = els.yearChart;
       const ctx = canvas.getContext("2d");
@@ -2304,6 +2357,7 @@
       const chartH = height - pad.top - pad.bottom;
       const barGap = 8;
       const barW = Math.max(11, (chartW - barGap * 11) / 12);
+      state.chartBars = [];
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "#fffefa";
@@ -2328,15 +2382,32 @@
         const x = pad.left + index * (barW + barGap);
         const h = value ? Math.max(5, (value / max) * chartH) : 0;
         const y = pad.top + chartH - h;
+        const isPicked = index === state.chartSelection;
+        const isSelected = index === state.selectedMonth;
+        state.chartBars.push({
+          index,
+          value,
+          x: x - barGap / 2,
+          y: pad.top,
+          width: barW + barGap,
+          height: chartH,
+        });
         const grad = ctx.createLinearGradient(0, y, 0, pad.top + chartH);
-        grad.addColorStop(0, index === state.selectedMonth ? "#d85f3f" : "#16746b");
-        grad.addColorStop(1, index === state.selectedMonth ? "#f3a076" : "#63b2a9");
+        grad.addColorStop(0, isPicked ? "#d85f3f" : isSelected ? "#1f6f9f" : "#16746b");
+        grad.addColorStop(1, isPicked ? "#f3a076" : isSelected ? "#65a9d7" : "#63b2a9");
         ctx.fillStyle = grad;
         roundRect(ctx, x, y, barW, h, 5);
         ctx.fill();
+        if (isPicked) {
+          ctx.strokeStyle = "rgba(216, 95, 63, .42)";
+          ctx.lineWidth = 2;
+          roundRect(ctx, x - 3, y - 3, barW + 6, h + 6, 7);
+          ctx.stroke();
+        }
         ctx.fillStyle = "#6f6b62";
         ctx.fillText(SHORT_MONTHS[index], x - 1, height - 18);
       });
+      renderChartDetail(data);
     }
 
     function shortMoney(value) {
@@ -2579,6 +2650,25 @@
         .replaceAll("'", "&#039;");
     }
 
+    function selectChartMonth(index) {
+      state.chartSelection = normalizeMonth(index);
+      state.selectedMonth = state.chartSelection;
+      render();
+    }
+
+    function chartMonthFromPoint(clientX, clientY) {
+      const rect = els.yearChart.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      const hit = state.chartBars.find(bar =>
+        x >= bar.x &&
+        x <= bar.x + bar.width &&
+        y >= bar.y &&
+        y <= bar.y + bar.height
+      );
+      return hit?.index ?? null;
+    }
+
     els.clientForm.addEventListener("submit", upsertClient);
     els.viewTabs.forEach(tab => {
       tab.addEventListener("click", () => setView(tab.dataset.view));
@@ -2641,11 +2731,33 @@
     });
     els.monthSelect.addEventListener("change", event => {
       state.selectedMonth = Number(event.target.value);
+      if (Number.isInteger(state.chartSelection)) {
+        state.chartSelection = state.selectedMonth;
+      }
       render();
     });
     els.yearSelect.addEventListener("change", event => {
       state.selectedYear = normalizeYear(event.target.value);
       render();
+    });
+    els.yearChart.addEventListener("pointerdown", event => {
+      const month = chartMonthFromPoint(event.clientX, event.clientY);
+      if (month === null) return;
+      selectChartMonth(month);
+    });
+    els.yearChart.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      const current = Number.isInteger(state.chartSelection) ? state.chartSelection : state.selectedMonth;
+      if (event.key === "ArrowLeft") {
+        selectChartMonth(Math.max(0, current - 1));
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        selectChartMonth(Math.min(11, current + 1));
+        return;
+      }
+      selectChartMonth(current);
     });
     els.ledgerContent.addEventListener("input", event => {
       const target = event.target;
