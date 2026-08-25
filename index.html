@@ -2652,8 +2652,7 @@
 
     function selectChartMonth(index) {
       state.chartSelection = normalizeMonth(index);
-      state.selectedMonth = state.chartSelection;
-      render();
+      renderChart();
     }
 
     function chartMonthFromPoint(clientX, clientY) {
@@ -2743,6 +2742,7 @@
     els.yearChart.addEventListener("pointerdown", event => {
       const month = chartMonthFromPoint(event.clientX, event.clientY);
       if (month === null) return;
+      event.preventDefault();
       selectChartMonth(month);
     });
     els.yearChart.addEventListener("keydown", event => {
